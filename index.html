@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>NEON OVERDRIVE 2026</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+        canvas { display: block; }
+        
+        /* واجهة المستخدم */
+        #ui-container {
+            position: fixed; inset: 0; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 100;
+            background: radial-gradient(circle, rgba(0,255,255,0.1) 0%, rgba(0,0,0,0.9) 100%);
+        }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px);
+            padding: 40px; border-radius: 20px; border: 1px solid rgba(0,255,255,0.3);
+            text-align: center; box-shadow: 0 0 30px rgba(0,255,255,0.2);
+        }
+
+        h1 { font-size: 45px; margin: 0; color: #0ff; text-shadow: 0 0 20px #0ff; letter-spacing: 4px; }
+        
+        button {
+            margin-top: 25px; padding: 15px 50px; font-size: 20px; background: #0ff;
+            border: none; color: #000; cursor: pointer; font-weight: bold;
+            clip-path: polygon(15% 0, 100% 0, 85% 100%, 0 100%); transition: 0.3s;
+        }
+        button:hover { transform: scale(1.1); background: #f0f; box-shadow: 0 0 30px #f0f; }
+
+        .hud {
+            position: fixed; top: 20px; width: 100%; display: flex; justify-content: space-between;
+            padding: 0 30px; box-sizing: border-box; color: #0ff; pointer-events: none;
+            font-family: 'Courier New', monospace; font-size: 20px;
+        }
+
+        /* التحكم للهاتف */
+        .controls { position: fixed; bottom: 40px; width: 100%; display: flex; justify-content: space-around; pointer-events: none; }
+        .btn { 
+            width: 80px; height: 80px; background: rgba(0,255,255,0.1); border: 2px solid #0ff;
+            border-radius: 50%; display: none; pointer-events: auto; justify-content: center; align-items: center;
+            color: #0ff; font-size: 30px; box-shadow: 0 0 15px #0ff;
+        }
+        @media (pointer: coarse) { .btn { display: flex; } }
+    </style>
+</head>
+<body>
+
+<div id="ui-container">
+    <div class="glass-panel" id="mainMenu">
+        <h1>NEON OVERDRIVE</h1>
+        <p style="color: #aaa;">اجتز 4 مراحل للوصول إلى خط النهاية</p>
+        <button onclick="startGame()">انطلاق ⚡</button>
+    </div>
+</div>
+
+<div class="hud" id="hud" style="display:none">
+    <div id="lvl-info">STAGE: 1</div>
+    <div id="dist-info">0000 / 1000m</div>
+</div>
+
+<div class="controls">
+    <div class="btn" id="lBtn">‹</div>
+    <div class="btn" id="rBtn">›</div>
+</div>
+
+<canvas id="game"></canvas>
+
+<script>
+/** @type {HTMLCanvasElement} */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+let game = {
+    active: false,
+    distance: 0,
+    speed: 0,
+    targetSpeed: 8,
+    lane: 1,
+    carX: 0,
+    tilt: 0,
+    enemies: [],
+    particles: [],
+    level: 1,
+    transition: 0
+};
+
+const levels = [
+    { name: "CYBER CITY", color: "#00f2ff", accent: "#f0f" },
+    { name: "TOXIC WASTE", color: "#39ff14", accent: "#fff" },
+    { name: "HELL DRIVE", color: "#ff0055", accent: "#ffea00" },
+    { name: "VOID RUNNER", color: "#ffffff", accent: "#00f2ff" }
+];
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    game.carX = canvas.width / 2;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// التحكم
+const move = (dir) => { 
+    if(!game.active) return;
+    game.lane = Math.max(0, Math.min(2, game.lane + dir)); 
+};
+window.addEventListener('keydown', e => {
+    if(e.key === 'ArrowLeft') move(-1);
+    if(e.key === 'ArrowRight') move(1);
+});
+document.getElementById('lBtn').onclick = () => move(-1);
+document.getElementById('rBtn').onclick = () => move(1);
+
+function startGame() {
+    game.active = true;
+    game.distance = 0;
+    game.level = 1;
+    game.enemies = [];
+    game.speed = 0;
+    document.getElementById('ui-container').style.display = 'none';
+    document.getElementById('hud').style.display = 'flex';
+}
+
+function update() {
+    if(!game.active) return;
+
+    // فيزياء الحركة
+    game.speed += (game.targetSpeed + (game.level * 2) - game.speed) * 0.01;
+    game.distance += game.speed / 10;
+    
+    // تحويل المراحل
+    let nextLvl = Math.floor(game.distance / 1000) + 1;
+    if(nextLvl > game.level) {
+        if(nextLvl > 4) { victory(); return; }
+        game.level = nextLvl;
+        game.transition = 1.0; // بدء تأثير الانتقال
+    }
+    if(game.transition > 0) game.transition -= 0.02;
+
+    // حركة السيارة السلسة
+    const laneWidth = 100;
+    const targetX = (canvas.width / 2) + (game.lane - 1) * laneWidth;
+    game.tilt = (targetX - game.carX) * 0.1;
+    game.carX += (targetX - game.carX) * 0.15;
+
+    // توليد الأعداء
+    if(Math.random() < 0.02 + (game.level * 0.005)) {
+        let l = Math.floor(Math.random() * 3);
+        if(game.enemies.filter(e => e.y < 100).length === 0) { // منع التداخل القريب
+             game.enemies.push({ x: (canvas.width/2) + (l-1)*laneWidth, y: -100, lane: l });
+        }
+    }
+
+    game.enemies.forEach((en, i) => {
+        en.y += game.speed + 3;
+        // تصادم دقيق
+        if(en.lane === game.lane && en.y > canvas.height - 180 && en.y < canvas.height - 60) {
+            game.active = false;
+            setTimeout(() => location.reload(), 1000);
+        }
+        if(en.y > canvas.height) game.enemies.splice(i, 1);
+    });
+
+    // تحديث HUD
+    document.getElementById('lvl-info').innerText = "STAGE: " + levels[game.level-1].name;
+    document.getElementById('dist-info').innerText = Math.floor(game.distance % 1000).toString().padStart(4, '0') + " / 1000m";
+}
+
+function victory() {
+    game.active = false;
+    document.getElementById('ui-container').style.display = 'flex';
+    document.getElementById('mainMenu').innerHTML = `
+        <h1 style="color:gold">MISSION COMPLETE</h1>
+        <p>لقد أتممت المهمة بنجاح!</p>
+        <button onclick="location.reload()">العودة للرئيسية</button>
+    `;
+}
+
+function draw() {
+    const theme = levels[game.level-1];
+    
+    // مسح الشاشة مع تأثير "Motion Blur" بسيط
+    ctx.fillStyle = `rgba(0, 0, 5, ${0.3 + game.transition})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // رسم الطريق المنظوري
+    const centerX = canvas.width / 2;
+    ctx.strokeStyle = theme.color;
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = 10; ctx.shadowColor = theme.color;
+
+    // خطوط الشبكة الأرضية (Grid)
+    for(let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.moveTo(centerX + i * 110, 0);
+        ctx.lineTo(centerX + i * 200, canvas.height);
+        ctx.globalAlpha = 0.2;
+        ctx.stroke();
+    }
+
+    // الخطوط المتحركة
+    ctx.globalAlpha = 0.6;
+    ctx.setLineDash([40, 60]);
+    ctx.lineDashOffset = -(game.distance * 10);
+    for(let i = -1.5; i <= 1.5; i += 1) {
+        ctx.beginPath();
+        ctx.moveTo(centerX + i * 100, 0);
+        ctx.lineTo(centerX + i * 100, canvas.height);
+        ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+
+    // رسم اللاعب
+    drawCar(game.carX, canvas.height - 140, theme.color, game.tilt, false);
+
+    // رسم الأعداء
+    game.enemies.forEach(en => drawCar(en.x, en.y, theme.accent, 0, true));
+    
+    // تأثير الانتقال (Flash)
+    if(game.transition > 0) {
+        ctx.fillStyle = `rgba(255,255,255,${game.transition})`;
+        ctx.fillRect(0,0,canvas.width, canvas.height);
+    }
+}
+
+function drawCar(x, y, color, tilt, isEnemy) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(tilt * Math.PI / 180);
+    
+    // توهج المحرك
+    ctx.shadowBlur = 20; ctx.shadowColor = color;
+    ctx.fillStyle = color;
+
+    if(!isEnemy) {
+        // هيكل رياضي متطور
+        ctx.beginPath();
+        ctx.moveTo(-25, 0); ctx.lineTo(25, 0); // المقدمة
+        ctx.lineTo(35, 70); ctx.lineTo(-35, 70); // الخلفية
+        ctx.fill();
+        
+        // قمرة القيادة (زجاج نيون)
+        ctx.fillStyle = "#000";
+        ctx.fillRect(-15, 15, 30, 25);
+        
+        // أضواء النيون السفلية
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.5;
+        ctx.fillRect(-40, 50, 80, 5);
+    } else {
+        // سيارة العدو (تصميم هجومي)
+        ctx.beginPath();
+        ctx.moveTo(-25, 70); ctx.lineTo(25, 70);
+        ctx.lineTo(35, 0); ctx.lineTo(-35, 0);
+        ctx.fill();
+        ctx.fillStyle = "rgba(0,0,0,0.7)";
+        ctx.fillRect(-15, 30, 30, 20);
+    }
+    ctx.restore();
+}
+
+function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
